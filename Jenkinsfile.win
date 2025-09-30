@@ -27,6 +27,14 @@ pipeline {
                 bat "${env.SAG_HOME}/common/lib/ant/bin/ant -DSAGHome=${env.SAG_HOME} -DSAG_CI_HOME=${env.SAG_CI_HOME} -DprojectName=${env.JOB_NAME} build"
             }
         }
+        stage('Publish Build to Deployer') {
+            steps {
+                sh """
+                  scp -r target/sagdevops-ci-assets-1/build \
+                     wmuser@184.169.41.109:/opt/softwareag/Deployer/repositories/sagdevops-ci-assets-1
+                """
+            }
+        }
         stage('Deploy') {
             steps {
 		bat "${env.SAG_HOME}/common/lib/ant/bin/ant -DSAGHome=${env.SAG_HOME} -DSAG_CI_HOME=${env.SAG_CI_HOME} -DprojectName=${env.JOB_NAME} deploy"
