@@ -19,7 +19,7 @@
 */
 
 pipeline {
-    agent any 
+    agent { label 'webmethods-agent' } 
 
     stages {
         stage('Build'){
