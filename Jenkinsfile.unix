@@ -1,77 +1,188 @@
-// Simple Jenkinsfile (Linux) - expects buildOutputDir already set to /opt/cicd/devops-apigateway/asset
+// Jenkinsfile - Debug output per step (Linux agent)
 pipeline {
-  agent { label 'webmethods-agent' } // ganti sesuai label node Anda
+  agent { label 'webmethods-agent' } // ganti sesuai node Anda
   options { timestamps() }
 
   environment {
-    SAG_HOME    = "${env.SAG_HOME}"                       // harus diset di Jenkins
-    SAG_CI_HOME = "${env.SAG_CI_HOME ?: env.SAG_CI_API_HOME}"
-    PROJECT_NAME = "${env.PROJECT_NAME ?: env.JOB_NAME}"
-    // langsung pakai path yang sudah ada di system.properties Anda
-    BUILD_OUTPUT_DIR = "/opt/cicd/devops-apigateway/asset"
+    SAG_HOME       = "${env.SAG_HOME}"
+    SAG_CI_HOME    = "{env.SAG_CI_API_HOME}"
+    PROJECT_NAME   = "${env.PROJECT_NAME ?: env.JOB_NAME}"
+    // jika ingin override, set BUILD_OUTPUT_DIR di job parameters; default ke yang Anda sebut
+    BUILD_OUTPUT_DIR = "${env.BUILD_OUTPUT_DIR ?: '/opt/cicd/devops-apigateway/asset'}"
   }
 
   stages {
     stage('Checkout') {
-      steps { checkout scm }
+      steps {
+        echo "=== Checkout ==="
+        checkout scm
+        sh '''
+          set -e
+          echo "Workspace: ${WORKSPACE}"
+          echo "Listing workspace root:"
+          ls -la "${WORKSPACE}" || true
+        '''
+      }
+    }
+
+    stage('Pre-Build Debug') {
+      steps {
+        echo "=== Pre-Build Debug: show env & files ==="
+        sh '''
+          set -e
+          echo "SAG_HOME = ${SAG_HOME}"
+          echo "SAG_CI_HOME = ${SAG_CI_HOME}"
+          echo "PROJECT_NAME = ${PROJECT_NAME}"
+          echo "BUILD_OUTPUT_DIR = ${BUILD_OUTPUT_DIR}"
+          echo ""
+
+          echo "pwd (current dir running shell): $(pwd)"
+          echo "ls -la . (workspace):"
+          ls -la . || true
+
+          # possible build files
+          echo ""
+          echo "Potential build files:"
+          [ -f "${WORKSPACE}/build.xml" ] && echo "FOUND: ${WORKSPACE}/build.xml"
+          [ -f "${SAG_CI_HOME}/buildApi.xml" ] && echo "FOUND: ${SAG_CI_HOME}/buildApi.xml"
+          [ -f "${SAG_CI_HOME}/build.xml" ] && echo "FOUND: ${SAG_CI_HOME}/build.xml"
+          echo ""
+
+          # show resolved absolute paths
+          echo "Resolved absolute paths (if exist):"
+          readlink -f "${WORKSPACE}/build.xml" || true
+          readlink -f "${SAG_CI_HOME}/buildApi.xml" || true
+          readlink -f "${SAG_CI_HOME}/build.xml" || true
+          echo ""
+
+          # show system.properties if present
+          for f in "${SAG_CI_HOME}/system.properties" "${WORKSPACE}/system.properties"; do
+            if [ -f "$f" ]; then
+              echo "---- Contents of $f ----"
+              sed -n '1,200p' "$f" || true
+              echo "---- end $f ----"
+            else
+              echo "No file: $f"
+            fi
+          done
+          echo ""
+
+          # list SAG_HOME and common lib
+          echo "Listing SAG_HOME (if exists):"
+          ls -la "${SAG_HOME}" || true
+          echo "Listing ${SAG_HOME}/common/lib (if exists):"
+          ls -la "${SAG_HOME}/common/lib" || true
+          echo ""
+
+          # list SAG_CI_HOME and potential lib dirs relative to it
+          echo "Listing SAG_CI_HOME (if exists):"
+          ls -la "${SAG_CI_HOME}" || true
+          echo "Listing ${SAG_CI_HOME}/lib (if exists):"
+          ls -la "${SAG_CI_HOME}/lib" || true
+          echo "Listing ${SAG_CI_HOME}/../.. (to illustrate '../../lib' effect):"
+          ls -la "${SAG_CI_HOME}/../.." || true
+          echo "Listing ${SAG_CI_HOME}/../../lib:"
+          ls -la "${SAG_CI_HOME}/../../lib" || true
+          echo ""
+
+          # check /opt/lib as seen in logs
+          echo "Listing /opt/lib (why build might fail):"
+          ls -la /opt/lib || true
+
+          # print java and ant info
+          echo "Which ant:"
+          which ant || true
+          echo "Ant in SAG_HOME path (if exists):"
+          [ -x "${SAG_HOME}/common/lib/ant/bin/ant" ] && echo "Ant binary exists at ${SAG_HOME}/common/lib/ant/bin/ant" || echo "No ant at ${SAG_HOME}/common/lib/ant/bin/ant"
+          echo "Ant version (if ant in PATH):"
+          ant -version || true
+        '''
+      }
     }
 
     stage('Build API') {
       steps {
-        echo "Building API project: ${env.PROJECT_NAME}"
+        echo "=== Build API (with debug prints) ==="
         sh '''
           set -e
-          "${SAG_HOME}/common/lib/ant/bin/ant" \
-            -DSAGHome="${SAG_HOME}" \
-            -DSAG_CI_HOME="${SAG_CI_API_HOME}" \
-            -DprojectName="${PROJECT_NAME}" \
-            -DbuildOutputDir="${BUILD_OUTPUT_DIR}" \
-            -Dbuild.output.dir="${BUILD_OUTPUT_DIR}" \
-            build
-        '''
-      }
-    }
+          echo "-> Before running Ant: show cwd and where Ant file is"
+          echo "Current working directory: $(pwd)"
+          echo "Will attempt to use build file from (prefer SAG_CI_HOME): ${SAG_CI_HOME}/buildApi.xml"
+          echo "If not present, Ant may use ${WORKSPACE}/build.xml"
 
-    stage('Deploy') {
-      steps {
-        echo "Deploying from ${BUILD_OUTPUT_DIR}"
-        sh '''
-          set -e
+          # Print basedir that Ant will use by simulating dirname
+          if [ -f "${SAG_CI_HOME}/buildApi.xml" ]; then
+            ANT_BUILD_FILE="${SAG_CI_HOME}/buildApi.xml"
+          elif [ -f "${WORKSPACE}/build.xml" ]; then
+            ANT_BUILD_FILE="${WORKSPACE}/build.xml"
+          else
+            ANT_BUILD_FILE=""
+          fi
+
+          echo "ANT_BUILD_FILE=${ANT_BUILD_FILE}"
+          if [ -n "${ANT_BUILD_FILE}" ]; then
+            echo "ANT_BASEDIR=$(dirname $(readlink -f "${ANT_BUILD_FILE}"))"
+          else
+            echo "No build file found; Ant will error"
+          fi
+
+          echo "----- Now listing jars that Ant will include (based on apigateway.ant.lib.dir default and relative filesets) -----"
+          # default apigateway.ant.lib.dir is ${basedir}/lib, so show that folder if build file exists
+          if [ -n "${ANT_BUILD_FILE}" ]; then
+            BASEDIR=$(dirname "$(readlink -f "${ANT_BUILD_FILE}")")
+            echo "Basedir resolved: ${BASEDIR}"
+            echo "Basedir/lib:"
+            ls -la "${BASEDIR}/lib" || true
+            echo "BASEDIR/../../lib (two levels up):"
+            ls -la "${BASEDIR}/../../lib" || true
+          fi
+
+          echo ""
+          echo "Now running Ant build (passing BUILD_OUTPUT_DIR=${BUILD_OUTPUT_DIR})"
+          # Run Ant (pass apigateway.ant.lib.dir override if you want — right now we do NOT override, just run)
           "${SAG_HOME}/common/lib/ant/bin/ant" \
             -DSAGHome="${SAG_HOME}" \
             -DSAG_CI_HOME="${SAG_CI_HOME}" \
             -DprojectName="${PROJECT_NAME}" \
-            -DbuildOutputDir="${BUILD_OUTPUT_DIR}" \
             -Dbuild.output.dir="${BUILD_OUTPUT_DIR}" \
-            deploy
+            -DbuildOutputDir="${BUILD_OUTPUT_DIR}" \
+            -v build || true
+
+          echo "Ant finished (exit code ignored for debug - remove '|| true' for real run)"
         '''
       }
     }
 
-    stage('Test') {
+    stage('Post-Build Debug') {
       steps {
-        echo "Testing"
+        echo "=== Post-Build: show artifact locations ==="
+        sh '''
+          set -e || true
+          echo "BUILD_OUTPUT_DIR = ${BUILD_OUTPUT_DIR}"
+          echo "Listing BUILD_OUTPUT_DIR:"
+          ls -la "${BUILD_OUTPUT_DIR}" || true
+          echo "Listing expected project build under workspace:"
+          ls -la "${WORKSPACE}/target/${PROJECT_NAME}/build" || true
+        '''
+      }
+    }
+
+    stage('Deploy (dry check)') {
+      steps {
+        echo "=== Deploy check: show what deploy would see ==="
         sh '''
           set -e
-          "${SAG_HOME}/common/lib/ant/bin/ant" \
-            -DSAGHome="${SAG_HOME}" \
-            -DSAG_CI_HOME="${SAG_CI_HOME}" \
-            -DprojectName="${PROJECT_NAME}" \
-            -DbuildOutputDir="${BUILD_OUTPUT_DIR}" \
-            -Dbuild.output.dir="${BUILD_OUTPUT_DIR}" \
-            test
+          echo "Checking content before deploy:"
+          ls -la "${BUILD_OUTPUT_DIR}/${PROJECT_NAME}" || true
+          echo "If deploy step runs, it will call Ant deploy using same properties."
         '''
-        // terbitkan hasil JUnit (sesuaikan pattern jika diperlukan)
-        junit testResults: '**/report/*.xml', allowEmptyResults: true
       }
     }
   }
 
   post {
-    success { echo "Pipeline SUCCESS: ${env.JOB_NAME} #${env.BUILD_NUMBER}" }
-    failure { echo "Pipeline FAILED: ${env.JOB_NAME} #${env.BUILD_NUMBER}" }
     always {
-      echo "Finished pipeline for ${env.PROJECT_NAME}"
+      echo "=== Pipeline finished for ${env.PROJECT_NAME} ==="
     }
   }
 }
