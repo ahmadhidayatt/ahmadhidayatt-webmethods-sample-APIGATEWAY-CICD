@@ -2,7 +2,7 @@
 // Adjust agent label and environment variables as needed.
 
 pipeline {
-  agent { label 'webmethods-agent-linux' }   // ganti sesuai label node Linux Anda
+  agent { label 'webmethods-agent' }   // ganti sesuai label node Linux Anda
   options {
     buildDiscarder(logRotator(numToKeepStr: '10'))
     timestamps()
