@@ -1,42 +1,129 @@
-/*
-* Copyright © 2010 - 2013 Apama Ltd.
-* Copyright © 2013 - 2018 Software AG, Darmstadt, Germany and/or its licensors
-*
-* SPDX-License-Identifier: Apache-2.0
-*
-*   Licensed under the Apache License, Version 2.0 (the "License");
-*   you may not use this file except in compliance with the License.
-*   You may obtain a copy of the License at
-*
-*       http://www.apache.org/licenses/LICENSE-2.0
-*
-*   Unless required by applicable law or agreed to in writing, software
-*   distributed under the License is distributed on an "AS IS" BASIS,
-*   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-*   See the License for the specific language governing permissions and
-*   limitations under the License.                                                            
-*
-*/
+// Jenkinsfile (Declarative Pipeline) - Windows agent (uses bat)
+// Adjust agent label and environment variables as needed.
 
 pipeline {
-    agent { label 'webmethods-agent' } 
+  agent { label 'windows' }   // <-- ganti sesuai label agent Windows Anda
+  options {
+    // keep 10 builds for example; sesuaikan atau hapus jika tidak perlu
+    buildDiscarder(logRotator(numToKeepStr: '10'))
+    timestamps()
+  }
 
-    stages {
-        stage('Build'){
-            steps {
-                sh "${env.SAG_HOME}/common/lib/ant/bin/ant -DSAGHome=${env.SAG_HOME} -DSAG_CI_HOME=${env.SAG_CI_HOME} -DprojectName=${env.JOB_NAME} build"
-            }
-        }
-        stage('Deploy') {
-            steps {
-		sh "${env.SAG_HOME}/common/lib/ant/bin/ant -DSAGHome=${env.SAG_HOME} -DSAG_CI_HOME=${env.SAG_CI_HOME} -DprojectName=${env.JOB_NAME} deploy"
-            }
-        }
- 	stage('Test') {
-            steps {
-		sh "${env.SAG_HOME}/common/lib/ant/bin/ant -DSAGHome=${env.SAG_HOME} -DSAG_CI_HOME=${env.SAG_CI_HOME} -DprojectName=${env.JOB_NAME} test"
-		junit 'report/'
-            }
-        }
+  environment {
+    // Pastikan variabel-variabel ini tersedia di Jenkins (Global env or credentials)
+    // Contoh: set sebagai Global Environment Variables atau inject via credentials plugin
+    SAG_HOME   = "${env.SAG_HOME}"
+    SAG_CI_HOME= "${env.SAG_CI_HOME}"
+    // PROJECT_NAME bisa diset di Jenkins atau kita gunakan nama job jika kosong
+    PROJECT_NAME = "${env.PROJECT_NAME ?: env.JOB_NAME}"
+    // Jenkins workspace root
+    WORKSPACE_WIN = "${env.WORKSPACE}"
+  }
+
+  stages {
+    stage('Checkout') {
+      steps {
+        checkout scm
+      }
     }
+
+    stage('Build') {
+      steps {
+        script {
+          echo "Building project: ${env.PROJECT_NAME}"
+        }
+        // Run Ant (mirip dengan yang Anda pakai). Using call to %SAG_HOME%\common\lib\ant\bin\ant
+        bat """
+          call "%SAG_HOME%\\common\\lib\\ant\\bin\\ant" ^
+            -DSAGHome=%SAG_HOME% ^
+            -DSAG_CI_HOME=%SAG_CI_HOME% ^
+            -DprojectName=%PROJECT_NAME% build ^
+            -Dbuild.dir=%WORKSPACE%\\target
+        """
+        // Stash build output so Deploy stage (possibly on different node) can unstash it
+        // Stash path matches your Azure pipeline publish path:
+        stash includes: "target/${env.PROJECT_NAME}/build/**", name: 'buildOutput', allowEmpty: false
+        // Optionally also archive artifacts in Jenkins UI:
+        archiveArtifacts artifacts: "target/${env.PROJECT_NAME}/build/**", fingerprint: true
+      }
+      post {
+        failure {
+          echo 'Build failed — check console output'
+        }
+      }
+    } // end Build
+
+    stage('Deploy') {
+      steps {
+        // unstash the previously-stashed build artifact
+        unstash 'buildOutput'
+
+        // Copy artifacts to expected target build path and list contents (similar to your xcopy/dir)
+        bat """
+          echo Copying artifact to expected build path...
+          set "TARGET_BUILD_PATH=%WORKSPACE%\\target\\%PROJECT_NAME%\\build"
+          if not exist "%TARGET_BUILD_PATH%" mkdir "%TARGET_BUILD_PATH%"
+          xcopy /E /I /Y "%WORKSPACE%\\target\\${env.PROJECT_NAME}\\build\\*" "%TARGET_BUILD_PATH%\\"
+        """
+
+        // Verify build folder content
+        bat """
+          echo === Verifying build contents ===
+          dir "%WORKSPACE%\\target\\%PROJECT_NAME%\\build" /s
+        """
+
+        // Run Ant deploy
+        bat """
+          call "%SAG_HOME%\\common\\lib\\ant\\bin\\ant" ^
+            -DSAGHome=%SAG_HOME% ^
+            -DSAG_CI_HOME=%SAG_CI_HOME% ^
+            -DprojectName=%PROJECT_NAME% deploy
+        """
+      }
+      post {
+        failure {
+          echo 'Deploy failed'
+        }
+      }
+    } // end Deploy
+
+    stage('Test') {
+      steps {
+        // Run Ant test
+        bat """
+          call "%SAG_HOME%\\common\\lib\\ant\\bin\\ant" ^
+            -DSAGHome=%SAG_HOME% ^
+            -DSAG_CI_HOME=%SAG_CI_HOME% ^
+            -DprojectName=%PROJECT_NAME% test
+        """
+
+        // Publish JUnit XML results (matches your Azure step '**/report/*.xml')
+        // This will mark the build as unstable/failed based on test results by default behavior:
+        junit testResults: '**/report/*.xml', allowEmptyResults: false, healthScaleFactor: 1.0
+      }
+      post {
+        failure {
+          echo 'Tests failed'
+        }
+        unstable {
+          echo 'Some tests are unstable/failed'
+        }
+      }
+    } // end Test
+
+  } // end stages
+
+  post {
+    always {
+      echo "Pipeline finished for ${env.PROJECT_NAME}"
+      // Keep archived artifacts for debugging
+      archiveArtifacts artifacts: "target/${env.PROJECT_NAME}/build/**", allowEmptyArchive: true
+    }
+    success {
+      echo "SUCCESS: ${env.JOB_NAME} #${env.BUILD_NUMBER}"
+    }
+    failure {
+      echo "FAILURE: ${env.JOB_NAME} #${env.BUILD_NUMBER}"
+    }
+  }
 }
