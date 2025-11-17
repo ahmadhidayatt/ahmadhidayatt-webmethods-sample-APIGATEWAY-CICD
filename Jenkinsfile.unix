@@ -2,7 +2,7 @@
 // Adjust agent label and environment variables as needed.
 
 pipeline {
-  agent { label 'webmethods-agent' }   // ganti sesuai label node Linux Anda
+  agent { label 'webmethods-agent-linux' }   // ganti sesuai label node Linux Anda
   options {
     buildDiscarder(logRotator(numToKeepStr: '10'))
     timestamps()
@@ -11,7 +11,7 @@ pipeline {
   environment {
     // Pastikan variabel-variabel ini tersedia di Jenkins (Global env or credentials)
     SAG_HOME    = "${env.SAG_HOME}"
-    SAG_CI_HOME = "${env.SAG_CI_API_HOME}"
+    SAG_CI_HOME = "${env.SAG_CI_HOME}"
     // PROJECT_NAME bisa diset di Jenkins, jika kosong akan pakai JOB_NAME
     PROJECT_NAME = "${env.PROJECT_NAME ?: env.JOB_NAME}"
     WORKSPACE_UNIX = "${env.WORKSPACE}"
