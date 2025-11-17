@@ -2,7 +2,7 @@
 // Adjust agent label and environment variables as needed.
 
 pipeline {
-  agent { label 'windows' }   // <-- ganti sesuai label agent Windows Anda
+  agent { label 'webmethods-agent' } 
   options {
     // keep 10 builds for example; sesuaikan atau hapus jika tidak perlu
     buildDiscarder(logRotator(numToKeepStr: '10'))
