@@ -100,55 +100,37 @@ pipeline {
       }
     }
 
-    stage('Build API') {
+     stage('Build API') {
       steps {
-        echo "=== Build API (with debug prints) ==="
         sh '''
           set -e
-          echo "-> Before running Ant: show cwd and where Ant file is"
-          echo "Current working directory: $(pwd)"
-          echo "Will attempt to use build file from (prefer SAG_CI_HOME): ${SAG_CI_HOME}/buildApi.xml"
-          echo "If not present, Ant may use ${WORKSPACE}/build.xml"
-
-          # Print basedir that Ant will use by simulating dirname
+          # choose build file: prefer SAG_CI_HOME/buildApi.xml if exists, else workspace build.xml
           if [ -f "${SAG_CI_HOME}/buildApi.xml" ]; then
-            ANT_BUILD_FILE="${SAG_CI_HOME}/buildApi.xml"
+            ANT_FILE="${SAG_CI_HOME}/buildApi.xml"
           elif [ -f "${WORKSPACE}/build.xml" ]; then
-            ANT_BUILD_FILE="${WORKSPACE}/build.xml"
+            ANT_FILE="${WORKSPACE}/build.xml"
           else
-            ANT_BUILD_FILE=""
+            echo "No Ant build file found (checked ${SAG_CI_HOME}/buildApi.xml and ${WORKSPACE}/build.xml)"
+            exit 2
           fi
 
-          echo "ANT_BUILD_FILE=${ANT_BUILD_FILE}"
-          if [ -n "${ANT_BUILD_FILE}" ]; then
-            echo "ANT_BASEDIR=$(dirname $(readlink -f "${ANT_BUILD_FILE}"))"
-          else
-            echo "No build file found; Ant will error"
-          fi
+          echo "Using Ant build file: ${ANT_FILE}"
+          # override apigateway.ant.lib.dir to point to SAG_CI_HOME/lib
+          APIGW_LIB="${SAG_CI_HOME}/lib"
+          echo "Overriding apigateway.ant.lib.dir -> ${APIGW_LIB}"
 
-          echo "----- Now listing jars that Ant will include (based on apigateway.ant.lib.dir default and relative filesets) -----"
-          # default apigateway.ant.lib.dir is ${basedir}/lib, so show that folder if build file exists
-          if [ -n "${ANT_BUILD_FILE}" ]; then
-            BASEDIR=$(dirname "$(readlink -f "${ANT_BUILD_FILE}")")
-            echo "Basedir resolved: ${BASEDIR}"
-            echo "Basedir/lib:"
-            ls -la "${BASEDIR}/lib" || true
-            echo "BASEDIR/../../lib (two levels up):"
-            ls -la "${BASEDIR}/../../lib" || true
-          fi
+          # ensure build output dir exists (the project's build will produce files here)
+          mkdir -p "${BUILD_OUTPUT_DIR}"
 
-          echo ""
-          echo "Now running Ant build (passing BUILD_OUTPUT_DIR=${BUILD_OUTPUT_DIR})"
-          # Run Ant (pass apigateway.ant.lib.dir override if you want — right now we do NOT override, just run)
-          "${SAG_HOME}/common/lib/ant/bin/ant" \
+          # run Ant specifying -f to use the intended build file and pass required properties
+          "${SAG_HOME}/common/lib/ant/bin/ant" -f "${ANT_FILE}" \
             -DSAGHome="${SAG_HOME}" \
             -DSAG_CI_HOME="${SAG_CI_HOME}" \
             -DprojectName="${PROJECT_NAME}" \
             -Dbuild.output.dir="${BUILD_OUTPUT_DIR}" \
             -DbuildOutputDir="${BUILD_OUTPUT_DIR}" \
-            -v build || true
-
-          echo "Ant finished (exit code ignored for debug - remove '|| true' for real run)"
+            -Dapigateway.ant.lib.dir="${APIGW_LIB}" \
+            build
         '''
       }
     }
