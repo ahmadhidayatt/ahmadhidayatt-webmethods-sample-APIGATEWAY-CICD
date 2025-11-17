@@ -1,24 +1,26 @@
-// Jenkinsfile (Declarative Pipeline) - Windows agent (uses bat)
+// Jenkinsfile (Declarative Pipeline) - Linux agent (uses sh)
 // Adjust agent label and environment variables as needed.
 
 pipeline {
-  agent { label 'webmethods-agent' } 
+  agent { label 'webmethods-agent' }   // ganti sesuai label node Linux Anda
   options {
-    // keep 10 builds for example; sesuaikan atau hapus jika tidak perlu
     buildDiscarder(logRotator(numToKeepStr: '10'))
     timestamps()
   }
 
   environment {
     // Pastikan variabel-variabel ini tersedia di Jenkins (Global env or credentials)
-    // Contoh: set sebagai Global Environment Variables atau inject via credentials plugin
-    SAG_HOME   = "${env.SAG_HOME}"
-    SAG_CI_HOME= "${env.SAG_CI_HOME}"
-    // PROJECT_NAME bisa diset di Jenkins atau kita gunakan nama job jika kosong
+    SAG_HOME    = "${env.SAG_HOME}"
+    SAG_CI_HOME = "${env.SAG_CI_HOME}"
+    // PROJECT_NAME bisa diset di Jenkins, jika kosong akan pakai JOB_NAME
     PROJECT_NAME = "${env.PROJECT_NAME ?: env.JOB_NAME}"
-    // Jenkins workspace root
-    WORKSPACE_WIN = "${env.WORKSPACE}"
+    WORKSPACE_UNIX = "${env.WORKSPACE}"
   }
+
+  // Jika Anda ingin menggunakan Ant yang dikelola Jenkins (opsional), uncomment tools block
+  // tools {
+  //   ant 'ant'   // definisikan tool Ant di Manage Jenkins -> Global Tool Configuration
+  // }
 
   stages {
     stage('Checkout') {
@@ -32,18 +34,21 @@ pipeline {
         script {
           echo "Building project: ${env.PROJECT_NAME}"
         }
-        // Run Ant (mirip dengan yang Anda pakai). Using call to %SAG_HOME%\common\lib\ant\bin\ant
-        bat """
-          call "%SAG_HOME%\\common\\lib\\ant\\bin\\ant" ^
-            -DSAGHome=%SAG_HOME% ^
-            -DSAG_CI_HOME=%SAG_CI_HOME% ^
-            -DprojectName=%PROJECT_NAME% build ^
-            -Dbuild.dir=%WORKSPACE%\\target
-        """
-        // Stash build output so Deploy stage (possibly on different node) can unstash it
-        // Stash path matches your Azure pipeline publish path:
+
+        // Jalankan Ant yang ada di $SAG_HOME (sesuaikan bila Anda pakai Jenkins-managed ant)
+        sh '''
+          set -e
+          "${SAG_HOME}/common/lib/ant/bin/ant" \
+            -DSAGHome="${SAG_HOME}" \
+            -DSAG_CI_HOME="${SAG_CI_HOME}" \
+            -DprojectName="${PROJECT_NAME}" build \
+            -Dbuild.dir="${WORKSPACE}/target"
+        '''
+
+        // Simpan hasil build agar bisa dipakai di stage lain (stash/unstash)
         stash includes: "target/${env.PROJECT_NAME}/build/**", name: 'buildOutput', allowEmpty: false
-        // Optionally also archive artifacts in Jenkins UI:
+
+        // Archive artifacts untuk UI Jenkins (opsional)
         archiveArtifacts artifacts: "target/${env.PROJECT_NAME}/build/**", fingerprint: true
       }
       post {
@@ -55,30 +60,28 @@ pipeline {
 
     stage('Deploy') {
       steps {
-        // unstash the previously-stashed build artifact
+        // Ambil kembali artefak yang di-stash
         unstash 'buildOutput'
 
-        // Copy artifacts to expected target build path and list contents (similar to your xcopy/dir)
-        bat """
-          echo Copying artifact to expected build path...
-          set "TARGET_BUILD_PATH=%WORKSPACE%\\target\\%PROJECT_NAME%\\build"
-          if not exist "%TARGET_BUILD_PATH%" mkdir "%TARGET_BUILD_PATH%"
-          xcopy /E /I /Y "%WORKSPACE%\\target\\${env.PROJECT_NAME}\\build\\*" "%TARGET_BUILD_PATH%\\"
-        """
-
-        // Verify build folder content
-        bat """
-          echo === Verifying build contents ===
-          dir "%WORKSPACE%\\target\\%PROJECT_NAME%\\build" /s
-        """
+        // Copy artifacts to expected build path and list contents
+        sh '''
+          set -e
+          TARGET_BUILD_PATH="${WORKSPACE}/target/${PROJECT_NAME}/build"
+          mkdir -p "$TARGET_BUILD_PATH"
+          # copy contents (preserve attributes)
+          cp -r "${WORKSPACE}/target/${PROJECT_NAME}/build/." "$TARGET_BUILD_PATH/"
+          echo "=== Verifying build contents ==="
+          ls -la "$TARGET_BUILD_PATH"
+        '''
 
         // Run Ant deploy
-        bat """
-          call "%SAG_HOME%\\common\\lib\\ant\\bin\\ant" ^
-            -DSAGHome=%SAG_HOME% ^
-            -DSAG_CI_HOME=%SAG_CI_HOME% ^
-            -DprojectName=%PROJECT_NAME% deploy
-        """
+        sh '''
+          set -e
+          "${SAG_HOME}/common/lib/ant/bin/ant" \
+            -DSAGHome="${SAG_HOME}" \
+            -DSAG_CI_HOME="${SAG_CI_HOME}" \
+            -DprojectName="${PROJECT_NAME}" deploy
+        '''
       }
       post {
         failure {
@@ -90,15 +93,15 @@ pipeline {
     stage('Test') {
       steps {
         // Run Ant test
-        bat """
-          call "%SAG_HOME%\\common\\lib\\ant\\bin\\ant" ^
-            -DSAGHome=%SAG_HOME% ^
-            -DSAG_CI_HOME=%SAG_CI_HOME% ^
-            -DprojectName=%PROJECT_NAME% test
-        """
+        sh '''
+          set -e
+          "${SAG_HOME}/common/lib/ant/bin/ant" \
+            -DSAGHome="${SAG_HOME}" \
+            -DSAG_CI_HOME="${SAG_CI_HOME}" \
+            -DprojectName="${PROJECT_NAME}" test
+        '''
 
-        // Publish JUnit XML results (matches your Azure step '**/report/*.xml')
-        // This will mark the build as unstable/failed based on test results by default behavior:
+        // Publish JUnit XML results
         junit testResults: '**/report/*.xml', allowEmptyResults: false, healthScaleFactor: 1.0
       }
       post {
@@ -116,7 +119,6 @@ pipeline {
   post {
     always {
       echo "Pipeline finished for ${env.PROJECT_NAME}"
-      // Keep archived artifacts for debugging
       archiveArtifacts artifacts: "target/${env.PROJECT_NAME}/build/**", allowEmptyArchive: true
     }
     success {
