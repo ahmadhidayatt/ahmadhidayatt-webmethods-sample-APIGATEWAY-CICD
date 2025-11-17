@@ -1,131 +1,77 @@
-// Jenkinsfile (Declarative Pipeline) - Linux agent (uses sh)
-// Adjust agent label and environment variables as needed.
-
+// Simple Jenkinsfile (Linux) - expects buildOutputDir already set to /opt/cicd/devops-apigateway/asset
 pipeline {
-  agent { label 'webmethods-agent' }   // ganti sesuai label node Linux Anda
-  options {
-    buildDiscarder(logRotator(numToKeepStr: '10'))
-    timestamps()
-  }
+  agent { label 'webmethods-agent' } // ganti sesuai label node Anda
+  options { timestamps() }
 
   environment {
-    // Pastikan variabel-variabel ini tersedia di Jenkins (Global env or credentials)
-    SAG_HOME    = "${env.SAG_HOME}"
-    SAG_CI_HOME = "${env.SAG_CI_API_HOME}"
-    // PROJECT_NAME bisa diset di Jenkins, jika kosong akan pakai JOB_NAME
+    SAG_HOME    = "${env.SAG_HOME}"                       // harus diset di Jenkins
+    SAG_CI_HOME = "${env.SAG_CI_HOME ?: env.SAG_CI_API_HOME}"
     PROJECT_NAME = "${env.PROJECT_NAME ?: env.JOB_NAME}"
-    WORKSPACE_UNIX = "${env.WORKSPACE}"
+    // langsung pakai path yang sudah ada di system.properties Anda
+    BUILD_OUTPUT_DIR = "/opt/cicd/devops-apigateway/asset"
   }
-
-  // Jika Anda ingin menggunakan Ant yang dikelola Jenkins (opsional), uncomment tools block
-  // tools {
-  //   ant 'ant'   // definisikan tool Ant di Manage Jenkins -> Global Tool Configuration
-  // }
 
   stages {
     stage('Checkout') {
-      steps {
-        checkout scm
-      }
+      steps { checkout scm }
     }
 
-    stage('Build') {
+    stage('Build API') {
       steps {
-        script {
-          echo "Building project: ${env.PROJECT_NAME}"
-        }
-
-        // Jalankan Ant yang ada di $SAG_HOME (sesuaikan bila Anda pakai Jenkins-managed ant)
+        echo "Building API project: ${env.PROJECT_NAME}"
         sh '''
           set -e
           "${SAG_HOME}/common/lib/ant/bin/ant" \
             -DSAGHome="${SAG_HOME}" \
             -DSAG_CI_HOME="${SAG_CI_HOME}" \
-            -DprojectName="${PROJECT_NAME}" build \
-            -Dbuild.dir="${WORKSPACE}/target"
+            -DprojectName="${PROJECT_NAME}" \
+            -DbuildOutputDir="${BUILD_OUTPUT_DIR}" \
+            -Dbuild.output.dir="${BUILD_OUTPUT_DIR}" \
+            build
         '''
-
-        // Simpan hasil build agar bisa dipakai di stage lain (stash/unstash)
-        stash includes: "target/${env.PROJECT_NAME}/build/**", name: 'buildOutput', allowEmpty: false
-
-        // Archive artifacts untuk UI Jenkins (opsional)
-        archiveArtifacts artifacts: "target/${env.PROJECT_NAME}/build/**", fingerprint: true
       }
-      post {
-        failure {
-          echo 'Build failed — check console output'
-        }
-      }
-    } // end Build
+    }
 
     stage('Deploy') {
       steps {
-        // Ambil kembali artefak yang di-stash
-        unstash 'buildOutput'
-
-        // Copy artifacts to expected build path and list contents
-        sh '''
-          set -e
-          TARGET_BUILD_PATH="${WORKSPACE}/target/${PROJECT_NAME}/build"
-          mkdir -p "$TARGET_BUILD_PATH"
-          # copy contents (preserve attributes)
-          cp -r "${WORKSPACE}/target/${PROJECT_NAME}/build/." "$TARGET_BUILD_PATH/"
-          echo "=== Verifying build contents ==="
-          ls -la "$TARGET_BUILD_PATH"
-        '''
-
-        // Run Ant deploy
+        echo "Deploying from ${BUILD_OUTPUT_DIR}"
         sh '''
           set -e
           "${SAG_HOME}/common/lib/ant/bin/ant" \
             -DSAGHome="${SAG_HOME}" \
             -DSAG_CI_HOME="${SAG_CI_HOME}" \
-            -DprojectName="${PROJECT_NAME}" deploy
+            -DprojectName="${PROJECT_NAME}" \
+            -DbuildOutputDir="${BUILD_OUTPUT_DIR}" \
+            -Dbuild.output.dir="${BUILD_OUTPUT_DIR}" \
+            deploy
         '''
       }
-      post {
-        failure {
-          echo 'Deploy failed'
-        }
-      }
-    } // end Deploy
+    }
 
     stage('Test') {
       steps {
-        // Run Ant test
+        echo "Testing"
         sh '''
           set -e
           "${SAG_HOME}/common/lib/ant/bin/ant" \
             -DSAGHome="${SAG_HOME}" \
             -DSAG_CI_HOME="${SAG_CI_HOME}" \
-            -DprojectName="${PROJECT_NAME}" test
+            -DprojectName="${PROJECT_NAME}" \
+            -DbuildOutputDir="${BUILD_OUTPUT_DIR}" \
+            -Dbuild.output.dir="${BUILD_OUTPUT_DIR}" \
+            test
         '''
-
-        // Publish JUnit XML results
-        junit testResults: '**/report/*.xml', allowEmptyResults: false, healthScaleFactor: 1.0
+        // terbitkan hasil JUnit (sesuaikan pattern jika diperlukan)
+        junit testResults: '**/report/*.xml', allowEmptyResults: true
       }
-      post {
-        failure {
-          echo 'Tests failed'
-        }
-        unstable {
-          echo 'Some tests are unstable/failed'
-        }
-      }
-    } // end Test
-
-  } // end stages
+    }
+  }
 
   post {
+    success { echo "Pipeline SUCCESS: ${env.JOB_NAME} #${env.BUILD_NUMBER}" }
+    failure { echo "Pipeline FAILED: ${env.JOB_NAME} #${env.BUILD_NUMBER}" }
     always {
-      echo "Pipeline finished for ${env.PROJECT_NAME}"
-      archiveArtifacts artifacts: "target/${env.PROJECT_NAME}/build/**", allowEmptyArchive: true
-    }
-    success {
-      echo "SUCCESS: ${env.JOB_NAME} #${env.BUILD_NUMBER}"
-    }
-    failure {
-      echo "FAILURE: ${env.JOB_NAME} #${env.BUILD_NUMBER}"
+      echo "Finished pipeline for ${env.PROJECT_NAME}"
     }
   }
 }
