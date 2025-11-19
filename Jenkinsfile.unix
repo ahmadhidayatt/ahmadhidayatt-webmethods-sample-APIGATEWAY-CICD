@@ -14,7 +14,7 @@ pipeline {
 
   environment {
     SAG_HOME    = "${env.SAG_HOME}"
-    SAG_CI_HOME = "${env.SAG_CI_HOME ?: env.SAG_CI_API_HOME}"
+    SAG_CI_HOME = "${env.SAG_CI_API_HOME ?: env.SAG_CI_API_HOME}"
     ANT_CMD     = "${env.SAG_HOME}/common/lib/ant/bin/ant"
     PROJECT_NAME = "${env.PROJECT_NAME ?: env.JOB_NAME}"
   }
