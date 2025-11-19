@@ -47,7 +47,7 @@ pipeline {
             -Dapigateway.is.password="${APIGW_IS_PASSWORD}" \
             -Dapigateway.assets.file="${APIGW_ASSETS_FILE}" \
             -Denable.build.APIGateway="${ENABLE_FLAG}" \
-            build
+            
         '''
       }
     }
