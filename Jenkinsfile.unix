@@ -1,6 +1,5 @@
 pipeline {
-
-  agent { any }
+  agent any
   options { timestamps() }
 
   parameters {
@@ -19,30 +18,31 @@ pipeline {
 
   stages {
     stage('Checkout') {
-      steps { checkout scm }
+      steps {
+        checkout scm
+      }
     }
 
     stage('Build') {
       steps {
         script {
-          // build property string (omit APIGW flags if disabled)
-          def apigwProps = params.ENABLE_BUILD_APIGW.toBoolean() ? """
-            -Dapigateway.is.url='${params.APIGW_IS_URL}'
-            -Dapigateway.is.username='${params.APIGW_IS_USERNAME}'
-            -Dapigateway.is.password='${params.APIGW_IS_PASSWORD}'
-            -Dapigateway.assets.file='${params.APIGW_ASSETS_FILE}'
+          def apigwProps = params.ENABLE_BUILD_APIGW ? """
+            -Dapigateway.is.url=${params.APIGW_IS_URL}
+            -Dapigateway.is.username=${params.APIGW_IS_USERNAME}
+            -Dapigateway.is.password=${params.APIGW_IS_PASSWORD}
+            -Dapigateway.assets.file=${params.APIGW_ASSETS_FILE}
             -Denable.build.APIGateway=${params.ENABLE_BUILD_APIGW}
           """ : ""
 
           def cmd = """${env.ANT} build \
-            -Dbuild.output.dir='${params.BUILD_OUTPUT_DIR}' \
+            -Dbuild.output.dir=${params.BUILD_OUTPUT_DIR} \
             ${apigwProps}
           """
 
-          // run the Ant build (Jenkins masks password param automatically)
           sh """
             set -o pipefail
             mkdir -p '${params.BUILD_OUTPUT_DIR}'
+            echo "Running: ${cmd}"
             ${cmd}
           """
         }
@@ -57,6 +57,8 @@ pipeline {
   }
 
   post {
-    always { sh 'echo Done; ls -la || true' }
+    always {
+      sh 'echo Done; ls -la || true'
+    }
   }
 }
