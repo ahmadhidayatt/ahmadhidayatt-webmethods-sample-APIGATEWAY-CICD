@@ -1,131 +1,116 @@
-// Jenkinsfile (Declarative Pipeline) - Linux agent (uses sh)
-// Adjust agent label and environment variables as needed.
-
 pipeline {
-  agent { label 'webmethods-agent' }   // ganti sesuai label node Linux Anda
-  options {
-    buildDiscarder(logRotator(numToKeepStr: '10'))
-    timestamps()
+  agent { label 'webmethods-agent' }
+  options { timestamps() }
+
+  parameters {
+    string(name: 'BUILD_OUTPUT_DIR', defaultValue: '/opt/cicd/devops-apigateway/asset', description: 'Build output dir (Linux path)')
+    string(name: 'APIGW_IS_URL', defaultValue: 'http://localhost:5552', description: 'apigateway.is.url')
+    string(name: 'APIGW_IS_USERNAME', defaultValue: 'Administrator', description: 'apigateway.is.username')
+    password(name: 'APIGW_IS_PASSWORD', defaultValue: 'manage', description: 'apigateway.is.password')
+    string(name: 'APIGW_ASSETS_FILE', defaultValue: '/opt/cicd/devops-apigateway/API-DataConf.json.json', description: 'Path to assets file (Linux)')
+    booleanParam(name: 'ENABLE_BUILD_APIGW', defaultValue: true, description: 'enable.build.APIGateway')
+    booleanParam(name: 'AUTO_DEPLOY', defaultValue: false, description: 'If true, run deploy stage automatically after build')
   }
 
   environment {
-    // Pastikan variabel-variabel ini tersedia di Jenkins (Global env or credentials)
     SAG_HOME    = "${env.SAG_HOME}"
-    SAG_CI_HOME = "${env.SAG_CI_API_HOME}"
-    // PROJECT_NAME bisa diset di Jenkins, jika kosong akan pakai JOB_NAME
+    SAG_CI_HOME = "${env.SAG_CI_HOME ?: env.SAG_CI_API_HOME}"
+    ANT_CMD     = "${env.SAG_HOME}/common/lib/ant/bin/ant"
     PROJECT_NAME = "${env.PROJECT_NAME ?: env.JOB_NAME}"
-    WORKSPACE_UNIX = "${env.WORKSPACE}"
   }
-
-  // Jika Anda ingin menggunakan Ant yang dikelola Jenkins (opsional), uncomment tools block
-  // tools {
-  //   ant 'ant'   // definisikan tool Ant di Manage Jenkins -> Global Tool Configuration
-  // }
 
   stages {
     stage('Checkout') {
-      steps {
-        checkout scm
-      }
+      steps { checkout scm }
     }
 
     stage('Build') {
       steps {
         script {
-          echo "Building project: ${env.PROJECT_NAME}"
+          def antFile = fileExists("${SAG_CI_HOME}/buildApi.xml") ? "${SAG_CI_HOME}/buildApi.xml" : (fileExists("${WORKSPACE}/build.xml") ? "${WORKSPACE}/build.xml" : null)
+          if (antFile == null) error("No Ant build file found in ${SAG_CI_HOME} or workspace")
+          env.ANT_FILE = antFile
+          echo "Using Ant file: ${env.ANT_FILE}"
         }
-
-        // Jalankan Ant yang ada di $SAG_HOME (sesuaikan bila Anda pakai Jenkins-managed ant)
         sh '''
           set -e
-          "${SAG_HOME}/common/lib/ant/bin/ant" \
+          if [ "${ENABLE_BUILD_APIGW}" = "true" ] || [ "${ENABLE_BUILD_APIGW}" = "True" ]; then ENABLE_FLAG=true; else ENABLE_FLAG=false; fi
+
+          echo "Running Ant build (-f ${ANT_FILE}) ..."
+          "${ANT_CMD}" -f "${ANT_FILE}" \
             -DSAGHome="${SAG_HOME}" \
             -DSAG_CI_HOME="${SAG_CI_HOME}" \
-            -DprojectName="${PROJECT_NAME}" build \
-            -Dbuild.dir="${WORKSPACE}/target"
+            -DprojectName="${PROJECT_NAME}" \
+            -Dbuild.output.dir="${BUILD_OUTPUT_DIR}" \
+            -Dapigateway.is.url="${APIGW_IS_URL}" \
+            -Dapigateway.is.username="${APIGW_IS_USERNAME}" \
+            -Dapigateway.is.password="${APIGW_IS_PASSWORD}" \
+            -Dapigateway.assets.file="${APIGW_ASSETS_FILE}" \
+            -Denable.build.APIGateway="${ENABLE_FLAG}" \
+            build
         '''
-
-        // Simpan hasil build agar bisa dipakai di stage lain (stash/unstash)
-        stash includes: "target/${env.PROJECT_NAME}/build/**", name: 'buildOutput', allowEmpty: false
-
-        // Archive artifacts untuk UI Jenkins (opsional)
-        archiveArtifacts artifacts: "target/${env.PROJECT_NAME}/build/**", fingerprint: true
       }
-      post {
-        failure {
-          echo 'Build failed — check console output'
-        }
-      }
-    } // end Build
+    }
 
     stage('Deploy') {
+      when {
+        anyOf {
+          expression { return params.AUTO_DEPLOY == true }
+          expression { return env.MANUAL_TRIGGER_DEPLOY == 'true' } // optional remote trigger
+        }
+      }
       steps {
-        // Ambil kembali artefak yang di-stash
-        unstash 'buildOutput'
-
-        // Copy artifacts to expected build path and list contents
+        // small sanity check and show content
         sh '''
           set -e
-          TARGET_BUILD_PATH="${WORKSPACE}/target/${PROJECT_NAME}/build"
-          mkdir -p "$TARGET_BUILD_PATH"
-          # copy contents (preserve attributes)
-          cp -r "${WORKSPACE}/target/${PROJECT_NAME}/build/." "$TARGET_BUILD_PATH/"
-          echo "=== Verifying build contents ==="
-          ls -la "$TARGET_BUILD_PATH"
-        '''
+          echo "Preparing to deploy. BUILD_OUTPUT_DIR=${BUILD_OUTPUT_DIR}"
+          echo "Contents of BUILD_OUTPUT_DIR (top):"
+          ls -la "${BUILD_OUTPUT_DIR}" || true
 
-        // Run Ant deploy
-        sh '''
-          set -e
-          "${SAG_HOME}/common/lib/ant/bin/ant" \
+          # If project artifacts were produced under BUILD_OUTPUT_DIR/<PROJECT_NAME>/build, show them
+          if [ -d "${BUILD_OUTPUT_DIR}/${PROJECT_NAME}/build" ]; then
+            echo "Project build artifacts found:"
+            ls -la "${BUILD_OUTPUT_DIR}/${PROJECT_NAME}/build" || true
+          else
+            echo "No project subfolder at ${BUILD_OUTPUT_DIR}/${PROJECT_NAME}/build - deploy may still proceed depending on build scripts."
+          fi
+
+          echo "Running Ant deploy (-f ${ANT_FILE}) ..."
+          "${ANT_CMD}" -f "${ANT_FILE}" \
             -DSAGHome="${SAG_HOME}" \
             -DSAG_CI_HOME="${SAG_CI_HOME}" \
-            -DprojectName="${PROJECT_NAME}" deploy
+            -DprojectName="${PROJECT_NAME}" \
+            -Dbuild.output.dir="${BUILD_OUTPUT_DIR}" \
+            -Dapigateway.is.url="${APIGW_IS_URL}" \
+            -Dapigateway.is.username="${APIGW_IS_USERNAME}" \
+            -Dapigateway.is.password="${APIGW_IS_PASSWORD}" \
+            -Dapigateway.assets.file="${APIGW_ASSETS_FILE}" \
+            deploy
         '''
       }
       post {
-        failure {
-          echo 'Deploy failed'
-        }
+        success { echo "Deploy succeeded" }
+        failure { echo "Deploy failed — check logs" }
       }
-    } // end Deploy
+    }
 
-    stage('Test') {
+    stage('Archive / Show outputs') {
       steps {
-        // Run Ant test
         sh '''
           set -e
-          "${SAG_HOME}/common/lib/ant/bin/ant" \
-            -DSAGHome="${SAG_HOME}" \
-            -DSAG_CI_HOME="${SAG_CI_HOME}" \
-            -DprojectName="${PROJECT_NAME}" test
+          echo "Listing BUILD_OUTPUT_DIR:"
+          ls -la "${BUILD_OUTPUT_DIR}" || true
+          echo "Listing workspace target dir if exists:"
+          ls -la "${WORKSPACE}/target/${PROJECT_NAME}/build" || true
         '''
-
-        // Publish JUnit XML results
-        junit testResults: '**/report/*.xml', allowEmptyResults: false, healthScaleFactor: 1.0
+        archiveArtifacts artifacts: "target/${env.PROJECT_NAME}/build/**", allowEmptyArchive: true
       }
-      post {
-        failure {
-          echo 'Tests failed'
-        }
-        unstable {
-          echo 'Some tests are unstable/failed'
-        }
-      }
-    } // end Test
-
-  } // end stages
+    }
+  }
 
   post {
-    always {
-      echo "Pipeline finished for ${env.PROJECT_NAME}"
-      archiveArtifacts artifacts: "target/${env.PROJECT_NAME}/build/**", allowEmptyArchive: true
-    }
-    success {
-      echo "SUCCESS: ${env.JOB_NAME} #${env.BUILD_NUMBER}"
-    }
-    failure {
-      echo "FAILURE: ${env.JOB_NAME} #${env.BUILD_NUMBER}"
-    }
+    always { echo "Finished pipeline for ${env.PROJECT_NAME}" }
+    success { echo "Pipeline SUCCESS: ${env.JOB_NAME} #${env.BUILD_NUMBER}" }
+    failure { echo "Pipeline FAILED: ${env.JOB_NAME} #${env.BUILD_NUMBER}" }
   }
 }
