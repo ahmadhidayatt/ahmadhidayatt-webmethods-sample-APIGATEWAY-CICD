@@ -78,7 +78,7 @@ pipeline {
                     -DprojectName=%PROJECT_NAME% test
                 """
 
-                junit 'report/*.xml'
+                
             }
         }
     }
