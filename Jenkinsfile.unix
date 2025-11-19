@@ -16,6 +16,7 @@ pipeline {
                         -DSAG_CI_HOME=${env.SAG_CI_HOME} \
                         -DprojectName=${env.JOB_NAME} \
                         -Dbuild.output.dir="/mnt/data/cicd/devops-apigateway/asset" \
+                        -Dmax.mem=-Xmx1024m \
                         build
                 """
             }
