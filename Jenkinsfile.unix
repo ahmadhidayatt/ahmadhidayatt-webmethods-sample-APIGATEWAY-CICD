@@ -1,5 +1,5 @@
 pipeline {
-    agent { label 'webmethods-agent' }
+    agent any
 
     environment {
         SAG_HOME    = "/mnt/data/softwareag"
