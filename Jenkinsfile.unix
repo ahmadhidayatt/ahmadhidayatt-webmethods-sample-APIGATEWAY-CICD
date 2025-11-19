@@ -1,21 +1,19 @@
 pipeline {
   agent { label 'webmethods-agent' }
+
   options { timestamps() }
 
   parameters {
     string(name: 'BUILD_OUTPUT_DIR', defaultValue: '/opt/cicd/devops-apigateway/asset', description: 'Build output dir (Linux path)')
-    string(name: 'APIGW_IS_URL', defaultValue: 'http://localhost:5552', description: 'apigateway.is.url')
-    string(name: 'APIGW_IS_USERNAME', defaultValue: 'Administrator', description: 'apigateway.is.username')
+    string(name: 'APIGW_IS_URL', defaultValue: 'http://ptmkpesbapidev:5555', description: 'apigateway.is.url')
+    string(name: 'APIGW_IS_USERNAME', defaultValue: 'sys.deployer', description: 'apigateway.is.username')
     password(name: 'APIGW_IS_PASSWORD', defaultValue: 'manage', description: 'apigateway.is.password')
-    string(name: 'APIGW_ASSETS_FILE', defaultValue: '/opt/cicd/devops-apigateway/API-DataConf.json.json', description: 'Path to assets file (Linux)')
+    string(name: 'APIGW_ASSETS_FILE', defaultValue: '/opt/cicd/devops-apigateway/API-DataConf.json', description: 'Path to assets file (Linux)')
     booleanParam(name: 'ENABLE_BUILD_APIGW', defaultValue: true, description: 'enable.build.APIGateway')
-    booleanParam(name: 'AUTO_DEPLOY', defaultValue: false, description: 'If true, run deploy stage automatically after build')
   }
 
   environment {
-    SAG_HOME    = "${env.SAG_HOME}"
-    SAG_CI_HOME = "${env.SAG_CI_API_HOME ?: env.SAG_CI_API_HOME}"
-    ANT_CMD     = "${env.SAG_HOME}/common/lib/ant/bin/ant"
+    ANT = "${env.ANT ?: '/usr/bin/ant'}"
     PROJECT_NAME = "${env.PROJECT_NAME ?: env.JOB_NAME}"
   }
 
@@ -27,90 +25,38 @@ pipeline {
     stage('Build') {
       steps {
         script {
-          def antFile = fileExists("${SAG_CI_HOME}/buildApi.xml") ? "${SAG_CI_HOME}/buildApi.xml" : (fileExists("${WORKSPACE}/build.xml") ? "${WORKSPACE}/build.xml" : null)
-          if (antFile == null) error("No Ant build file found in ${SAG_CI_HOME} or workspace")
-          env.ANT_FILE = antFile
-          echo "Using Ant file: ${env.ANT_FILE}"
-        }
-        sh '''
-          set -e
-          if [ "${ENABLE_BUILD_APIGW}" = "true" ] || [ "${ENABLE_BUILD_APIGW}" = "True" ]; then ENABLE_FLAG=true; else ENABLE_FLAG=false; fi
+          // build property string (omit APIGW flags if disabled)
+          def apigwProps = params.ENABLE_BUILD_APIGW.toBoolean() ? """
+            -Dapigateway.is.url='${params.APIGW_IS_URL}'
+            -Dapigateway.is.username='${params.APIGW_IS_USERNAME}'
+            -Dapigateway.is.password='${params.APIGW_IS_PASSWORD}'
+            -Dapigateway.assets.file='${params.APIGW_ASSETS_FILE}'
+            -Denable.build.APIGateway=${params.ENABLE_BUILD_APIGW}
+          """ : ""
 
-          echo "Running Ant build (-f ${ANT_FILE}) ..."
-          "${ANT_CMD}" -f "${ANT_FILE}" \
-            -DSAGHome="${SAG_HOME}" \
-            -DSAG_CI_HOME="${SAG_CI_HOME}" \
-            -DprojectName="${PROJECT_NAME}" \
-            -Dbuild.output.dir="${BUILD_OUTPUT_DIR}" \
-            -Dapigateway.is.url="${APIGW_IS_URL}" \
-            -Dapigateway.is.username="${APIGW_IS_USERNAME}" \
-            -Dapigateway.is.password="${APIGW_IS_PASSWORD}" \
-            -Dapigateway.assets.file="${APIGW_ASSETS_FILE}" \
-            -Denable.build.APIGateway="${ENABLE_FLAG}" \
-            
-        '''
+          def cmd = """${env.ANT} build \
+            -Dbuild.output.dir='${params.BUILD_OUTPUT_DIR}' \
+            ${apigwProps}
+          """
+
+          // run the Ant build (Jenkins masks password param automatically)
+          sh """
+            set -o pipefail
+            mkdir -p '${params.BUILD_OUTPUT_DIR}'
+            ${cmd}
+          """
+        }
       }
     }
 
-    stage('Deploy') {
-      when {
-        anyOf {
-          expression { return params.AUTO_DEPLOY == true }
-          expression { return env.MANUAL_TRIGGER_DEPLOY == 'true' } // optional remote trigger
-        }
-      }
+    stage('Archive') {
       steps {
-        // small sanity check and show content
-        sh '''
-          set -e
-          echo "Preparing to deploy. BUILD_OUTPUT_DIR=${BUILD_OUTPUT_DIR}"
-          echo "Contents of BUILD_OUTPUT_DIR (top):"
-          ls -la "${BUILD_OUTPUT_DIR}" || true
-
-          # If project artifacts were produced under BUILD_OUTPUT_DIR/<PROJECT_NAME>/build, show them
-          if [ -d "${BUILD_OUTPUT_DIR}/${PROJECT_NAME}/build" ]; then
-            echo "Project build artifacts found:"
-            ls -la "${BUILD_OUTPUT_DIR}/${PROJECT_NAME}/build" || true
-          else
-            echo "No project subfolder at ${BUILD_OUTPUT_DIR}/${PROJECT_NAME}/build - deploy may still proceed depending on build scripts."
-          fi
-
-          echo "Running Ant deploy (-f ${ANT_FILE}) ..."
-          "${ANT_CMD}" -f "${ANT_FILE}" \
-            -DSAGHome="${SAG_HOME}" \
-            -DSAG_CI_HOME="${SAG_CI_HOME}" \
-            -DprojectName="${PROJECT_NAME}" \
-            -Dbuild.output.dir="${BUILD_OUTPUT_DIR}" \
-            -Dapigateway.is.url="${APIGW_IS_URL}" \
-            -Dapigateway.is.username="${APIGW_IS_USERNAME}" \
-            -Dapigateway.is.password="${APIGW_IS_PASSWORD}" \
-            -Dapigateway.assets.file="${APIGW_ASSETS_FILE}" \
-            deploy
-        '''
-      }
-      post {
-        success { echo "Deploy succeeded" }
-        failure { echo "Deploy failed — check logs" }
-      }
-    }
-
-    stage('Archive / Show outputs') {
-      steps {
-        sh '''
-          set -e
-          echo "Listing BUILD_OUTPUT_DIR:"
-          ls -la "${BUILD_OUTPUT_DIR}" || true
-          echo "Listing workspace target dir if exists:"
-          ls -la "${WORKSPACE}/target/${PROJECT_NAME}/build" || true
-        '''
-        archiveArtifacts artifacts: "target/${env.PROJECT_NAME}/build/**", allowEmptyArchive: true
+        archiveArtifacts artifacts: "${params.BUILD_OUTPUT_DIR}/**/*", allowEmptyArchive: true
       }
     }
   }
 
   post {
-    always { echo "Finished pipeline for ${env.PROJECT_NAME}" }
-    success { echo "Pipeline SUCCESS: ${env.JOB_NAME} #${env.BUILD_NUMBER}" }
-    failure { echo "Pipeline FAILED: ${env.JOB_NAME} #${env.BUILD_NUMBER}" }
+    always { sh 'echo Done; ls -la || true' }
   }
 }
