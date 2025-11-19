@@ -60,6 +60,7 @@ pipeline {
                     -DSAGHome=%SAG_HOME% ^
                     -DSAG_CI_HOME=%SAG_CI_API_HOME% ^
                     -DSAG_CI_API_HOME=%SAG_CI_API_HOME% ^
+                    -DbuildOutputDir="%BUILD_DIR%" ^
                     -DprojectName=%PROJECT_NAME% deploy
                 """
             }
