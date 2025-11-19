@@ -30,6 +30,7 @@ pipeline {
       script {
         def apigwProps = params.ENABLE_BUILD_APIGW ? """
           -Dapigateway.is.url=${params.APIGW_IS_URL}
+          -Dapigateway.ant.lib.dir=/mnt/data/cicd/devops-apigateway/lib
           -Dapigateway.is.username=${params.APIGW_IS_USERNAME}
           -Dapigateway.is.password=${params.APIGW_IS_PASSWORD}
           -Dapigateway.assets.file=${params.APIGW_ASSETS_FILE}
