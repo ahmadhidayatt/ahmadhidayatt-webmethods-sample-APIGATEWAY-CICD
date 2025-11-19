@@ -39,7 +39,7 @@ pipeline {
         def cmd = """${env.ANT} build \
           -Dbuild.output.dir=${params.BUILD_OUTPUT_DIR} \
           -DSAG_CI_HOME=${env.SAG_CI_HOME} \
-          -DSAG_HOME=${env.SAG_HOME} \
+          -DSAGHome=${env.SAG_HOME} \
           ${apigwProps}
         """
 
