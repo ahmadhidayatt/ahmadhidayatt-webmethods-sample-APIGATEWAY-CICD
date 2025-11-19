@@ -4,6 +4,7 @@ pipeline {
     environment {
         SAG_HOME = 'C:\\SoftwareAG'
         SAG_CI_HOME = 'C:\\SoftwareAG\\common\\AssetBuildEnvironment'
+        SAG_CI_API_HOME = "${env.SAG_CI_API_HOME}"
         BUILD_DIR = "${WORKSPACE}\\build"
         ASSETS_FILE = "${WORKSPACE}\\API-DataConf.json"
         PROJECT_NAME = "${JOB_NAME}"
