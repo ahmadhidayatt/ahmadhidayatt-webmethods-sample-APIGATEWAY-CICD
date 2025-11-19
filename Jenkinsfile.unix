@@ -12,8 +12,8 @@ pipeline {
   }
 
   environment {
-    SAG_HOME = "${env.SAG_HOME}" 
-    SAG_CI_HOME = "${env.SAG_CI_HOME}" 
+    SAG_HOME = "/mnt/data/softwareag"
+    SAG_CI_HOME = "/mnt/data/softwareag/common" 
     ANT = "/mnt/data/softwareag/common/lib/ant/bin/ant"
     PROJECT_NAME = "${env.PROJECT_NAME ?: env.JOB_NAME}"
   }
