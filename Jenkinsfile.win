@@ -2,22 +2,30 @@ pipeline {
     agent any
 
     environment {
-        SAG_HOME    = 'C:\\SoftwareAG'
+        SAG_HOME = 'C:\\SoftwareAG'
         SAG_CI_HOME = 'C:\\SoftwareAG\\common\\AssetBuildEnvironment'
-        PROJECT_NAME = 'APIGatewayProject'
-        BUILD_DIR   = 'D:\\Kerja\\softwareAG\\CICD\\test'
-        ASSETS_FILE = 'D:\\Kerja\\softwareAG\\CICD\\API-Gateway\\API-DataConf.json'
+        BUILD_DIR = "${WORKSPACE}\\build"
+        ASSETS_FILE = "${WORKSPACE}\\API-DataConf.json"
+        PROJECT_NAME = "${JOB_NAME}"
     }
 
     stages {
 
-        /* ============================
-           BUILD
-        ============================ */
+        stage('Prepare Workspace') {
+            steps {
+                echo "Preparing workspace..."
+                bat "if not exist \"${BUILD_DIR}\" mkdir \"${BUILD_DIR}\""
+
+                // Copy config file to workspace (optional)
+                bat "copy /Y D:\\Kerja\\softwareAG\\CICD\\API-Gateway\\API-DataConf.json \"${ASSETS_FILE}\""
+            }
+        }
+
         stage('Build API Gateway Assets') {
             steps {
+                echo "Running API Gateway build..."
                 bat """
-                cd %SAG_HOME%\\common\\AssetBuildEnvironment\\bin
+                cd %SAG_CI_HOME%\\bin
                 build.bat ^
                     -Dbuild.output.dir=%BUILD_DIR% ^
                     -Dapigateway.is.url=http://localhost:5555 ^
@@ -31,42 +39,49 @@ pipeline {
 
         stage('Archive Artifact') {
             steps {
-                archiveArtifacts artifacts: 'D:\\Kerja\\softwareAG\\CICD\\test\\APIGateway\\APIGatewayAssets.zip'
+                echo "Archiving API Gateway Assets..."
+
+                bat "dir ${BUILD_DIR}\\APIGateway"
+
+                // Copy to workspace root so Jenkins can archive it
+                bat "copy /Y \"${BUILD_DIR}\\APIGateway\\APIGatewayAssets.zip\" \"${WORKSPACE}\\APIGatewayAssets.zip\""
+
+                archiveArtifacts artifacts: 'APIGatewayAssets.zip'
             }
         }
 
-        /* ============================
-           DEPLOY
-        ============================ */
         stage('Deploy to API Gateway') {
             steps {
+                echo "Deploying to API Gateway..."
+
                 bat """
                 call "%SAG_HOME%\\common\\lib\\ant\\bin\\ant" ^
-                  -DSAGHome=%SAG_HOME% ^
-                  -DSAG_CI_HOME=%SAG_CI_HOME% ^
-                  -DprojectName=%PROJECT_NAME% deploy
+                    -DSAGHome=%SAG_HOME% ^
+                    -DSAG_CI_HOME=%SAG_CI_HOME% ^
+                    -DprojectName=%PROJECT_NAME% deploy
                 """
             }
         }
 
-        /* ============================
-           TEST
-        ============================ */
         stage('Test API Gateway Deployment') {
             steps {
+                echo "Testing deployment..."
+
                 bat """
                 call "%SAG_HOME%\\common\\lib\\ant\\bin\\ant" ^
-                  -DSAGHome=%SAG_HOME% ^
-                  -DSAG_CI_HOME=%SAG_CI_HOME% ^
-                  -DprojectName=%PROJECT_NAME% test
+                    -DSAGHome=%SAG_HOME% ^
+                    -DSAG_CI_HOME=%SAG_CI_HOME% ^
+                    -DprojectName=%PROJECT_NAME% test
                 """
+
+                junit 'report/*.xml'
             }
         }
     }
 
     post {
         always {
-            echo 'Pipeline Completed.'
+            echo "Pipeline Completed."
         }
     }
 }
