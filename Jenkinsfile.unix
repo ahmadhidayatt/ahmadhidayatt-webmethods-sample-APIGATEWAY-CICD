@@ -12,7 +12,7 @@ pipeline {
   }
 
   environment {
-    ANT = "/mnt/data/softwareag/common/lib/ant/bin/ant.sh"
+    ANT = "/mnt/data/softwareag/common/lib/ant/bin/ant.cmd"
     PROJECT_NAME = "${env.PROJECT_NAME ?: env.JOB_NAME}"
   }
 
