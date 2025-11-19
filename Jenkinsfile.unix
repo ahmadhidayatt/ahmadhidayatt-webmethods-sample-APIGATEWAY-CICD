@@ -4,11 +4,11 @@ pipeline {
   options { timestamps() }
 
   parameters {
-    string(name: 'BUILD_OUTPUT_DIR', defaultValue: '/opt/cicd/devops-apigateway/asset', description: 'Build output dir (Linux path)')
-    string(name: 'APIGW_IS_URL', defaultValue: 'http://ptmkpesbapidev:5555', description: 'apigateway.is.url')
-    string(name: 'APIGW_IS_USERNAME', defaultValue: 'sys.deployer', description: 'apigateway.is.username')
+    string(name: 'BUILD_OUTPUT_DIR', defaultValue: '/mnt/data/cicd/devops-apigateway/asset', description: 'Build output dir (Linux path)')
+    string(name: 'APIGW_IS_URL', defaultValue: 'http://localhost:5555', description: 'apigateway.is.url')
+    string(name: 'APIGW_IS_USERNAME', defaultValue: 'Administrator', description: 'apigateway.is.username')
     password(name: 'APIGW_IS_PASSWORD', defaultValue: 'manage', description: 'apigateway.is.password')
-    string(name: 'APIGW_ASSETS_FILE', defaultValue: '/opt/cicd/devops-apigateway/API-DataConf.json', description: 'Path to assets file (Linux)')
+    string(name: 'APIGW_ASSETS_FILE', defaultValue: '/mnt/data/devops-apigateway/API-DataConf.json', description: 'Path to assets file (Linux)')
     booleanParam(name: 'ENABLE_BUILD_APIGW', defaultValue: true, description: 'enable.build.APIGateway')
   }
 
