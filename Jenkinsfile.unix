@@ -40,6 +40,10 @@ pipeline {
           -Dbuild.output.dir=${params.BUILD_OUTPUT_DIR} \
           -DSAG_CI_HOME=${env.SAG_CI_HOME} \
           -DSAGHome=${env.SAG_HOME} \
+          -Dinstall.dir=${env.SAG_HOME} \
+          -Dsag.install.dir=${env.SAG_HOME} \
+          -Dsoftwareag.home=${env.SAG_HOME} \
+          -DSAG_HOME=${env.SAG_HOME}
           ${apigwProps}
         """
 
